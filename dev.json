@@ -1,0 +1,47 @@
+{
+  "envOverrides": {
+    "/iggy/url": "IGGY_URL",
+    "/redis/url": "REDIS_URL",
+    "/rabbitmq/url": "RABBITMQ_URL",
+    "/llm/url": "LLM_URL",
+    "/llm/apiKey": "LLM_API_KEY"
+  },
+  "service": {
+    "name": "skw-dialog-service",
+    "rootKey": "01a01500-98d5-71fc-9038-71acb78d61c4",
+    "topicTypes": ["signed"]
+  },
+  "iggy": {
+    "url": "iggy://iggy:Secret123!@skw-iggy:3000",
+    "streamPrefix": "api-gate-stream"
+  },
+  "redis": {
+    "url": "redis://skw:password@skw-redis:6379"
+  },
+  "rabbitmq": {
+    "url": "amqp://rabbitmq:Secret123!@skw-rabbitmq:5672",
+    "queues": [
+      { "name": "dialog-ask", "prefetch": 4 }
+    ]
+  },
+  "postgres": {
+    "master": {
+      "url": "postgres://skw:password@skw-postgres:5432/skw",
+      "createServiceSchema": true,
+      "setSearchPathByService": true
+    },
+    "slave": {
+      "url": "postgres://skw:password@skw-postgres:5432/skw",
+      "createServiceSchema": false,
+      "setSearchPathByService": true
+    }
+  },
+  "llm": {
+    "url": "http://skw-ollama:11434/v1",
+    "apiKey": "",
+    "defaultModel": "llama3.2",
+    "models": ["llama3.2"],
+    "timeoutSecs": 120,
+    "maxAttempts": 3
+  }
+}
