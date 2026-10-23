@@ -93,22 +93,26 @@ struct ChatMessage<'a> {
     content: &'a str,
 }
 
+#[allow(dead_code)] // MOCK: only read by the commented-out LLM call in `chat`
 #[derive(Deserialize)]
 struct ChatResponse {
     choices: Vec<ChatChoice>,
     usage: Option<ChatUsage>,
 }
 
+#[allow(dead_code)] // MOCK: only read by the commented-out LLM call in `chat`
 #[derive(Deserialize)]
 struct ChatChoice {
     message: ChatChoiceMessage,
 }
 
+#[allow(dead_code)] // MOCK: only read by the commented-out LLM call in `chat`
 #[derive(Deserialize)]
 struct ChatChoiceMessage {
     content: Option<String>,
 }
 
+#[allow(dead_code)] // MOCK: only read by the commented-out LLM call in `chat`
 #[derive(Deserialize)]
 struct ChatUsage {
     prompt_tokens: Option<i32>,
@@ -153,31 +157,48 @@ impl LlmClient {
                 .collect(),
         };
 
-        let mut request = self.http.post(&self.url).json(&body);
-        if !self.api_key.is_empty() {
-            request = request.bearer_auth(&self.api_key);
-        }
+        // MOCK: no LLM call, answer echoes the last user message after a short delay
+        // (enough for clients to see the Pending state); restore the block below for a real LLM
+        let _ = (&self.http, &self.url, &self.api_key, &body);
+        tokio::time::sleep(Duration::from_secs(1)).await;
 
-        let response = request.send().await?;
-        let status = response.status();
-        if !status.is_success() {
-            let text = response.text().await.unwrap_or_default();
-            return Err(LlmError::Status(status.as_u16(), text));
-        }
-
-        let response: ChatResponse = response.json().await?;
-        let content = response
-            .choices
-            .into_iter()
-            .next()
-            .and_then(|c| c.message.content)
-            .filter(|c| !c.trim().is_empty())
-            .ok_or(LlmError::EmptyAnswer)?;
+        let question = history
+            .iter()
+            .rev()
+            .find(|(role, _)| matches!(role, MessageRole::User))
+            .map_or("", |(_, content)| content.as_str());
 
         Ok(Answer {
-            content,
-            input_tokens: response.usage.as_ref().and_then(|u| u.prompt_tokens),
-            output_tokens: response.usage.as_ref().and_then(|u| u.completion_tokens),
+            content: format!("[mock {model}] you said: {question}"),
+            input_tokens: Some(history.len() as i32),
+            output_tokens: Some(1),
         })
+
+        // let mut request = self.http.post(&self.url).json(&body);
+        // if !self.api_key.is_empty() {
+        //     request = request.bearer_auth(&self.api_key);
+        // }
+        //
+        // let response = request.send().await?;
+        // let status = response.status();
+        // if !status.is_success() {
+        //     let text = response.text().await.unwrap_or_default();
+        //     return Err(LlmError::Status(status.as_u16(), text));
+        // }
+        //
+        // let response: ChatResponse = response.json().await?;
+        // let content = response
+        //     .choices
+        //     .into_iter()
+        //     .next()
+        //     .and_then(|c| c.message.content)
+        //     .filter(|c| !c.trim().is_empty())
+        //     .ok_or(LlmError::EmptyAnswer)?;
+        //
+        // Ok(Answer {
+        //     content,
+        //     input_tokens: response.usage.as_ref().and_then(|u| u.prompt_tokens),
+        //     output_tokens: response.usage.as_ref().and_then(|u| u.completion_tokens),
+        // })
     }
 }
