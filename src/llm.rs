@@ -67,6 +67,7 @@ impl LlmError {
         match self {
             LlmError::Http(e) if e.is_timeout() => "LlmTimeout",
             LlmError::Http(_) => "LlmUnavailable",
+            LlmError::Status(408, _) => "LlmTimeout",
             LlmError::Status(429, _) => "LlmRateLimited",
             LlmError::Status(code, _) if *code >= 500 => "LlmUnavailable",
             LlmError::Status(..) => "LlmRejected",
@@ -200,5 +201,36 @@ impl LlmClient {
         //     input_tokens: response.usage.as_ref().and_then(|u| u.prompt_tokens),
         //     output_tokens: response.usage.as_ref().and_then(|u| u.completion_tokens),
         // })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retry_policy() {
+        for (code, retry, reason) in [
+            (400, false, "LlmRejected"),
+            (401, false, "LlmRejected"),
+            (404, false, "LlmRejected"),
+            (408, true, "LlmTimeout"),
+            (429, true, "LlmRateLimited"),
+            (500, true, "LlmUnavailable"),
+            (503, true, "LlmUnavailable"),
+        ] {
+            let e = LlmError::Status(code, String::new());
+            assert_eq!(
+                (e.is_retryable(), e.client_reason()),
+                (retry, reason),
+                "status {code}"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_answer_is_final() {
+        assert!(!LlmError::EmptyAnswer.is_retryable());
+        assert_eq!(LlmError::EmptyAnswer.client_reason(), "LlmEmptyAnswer");
     }
 }

@@ -17,7 +17,8 @@ struct QueueSettings {
 
 /// Queue config for `name` from `/rabbitmq/queues`; panics if it is missing (startup only).
 pub fn named_queue(name: &str) -> QueueConfig {
-    let queues: Vec<QueueSettings> = serde_json::from_value(APP.config.expect_value_cloned(RABBITMQ_QUEUES_PATH)).expect("invalid /rabbitmq/queues config");
+    let queues: Vec<QueueSettings> =
+        serde_json::from_value(APP.config.expect_value_cloned(RABBITMQ_QUEUES_PATH)).expect("invalid /rabbitmq/queues config");
 
     let settings = queues
         .iter()

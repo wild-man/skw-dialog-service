@@ -41,11 +41,19 @@ async fn handle_ask_task(task: DialogAskTask, db_pools: PostgresPools<PostgresCo
     }
 }
 
-async fn answer(task: &DialogAskTask, db_pools: &PostgresPools<PostgresConnected>, llm: &LlmClient, max_attempts: u32) -> Result<TaskOutcome, AppError> {
+async fn answer(
+    task: &DialogAskTask,
+    db_pools: &PostgresPools<PostgresConnected>,
+    llm: &LlmClient,
+    max_attempts: u32,
+) -> Result<TaskOutcome, AppError> {
     let pool = db_pools.master().await?;
 
     let Some((model, attempt)) = models::start_attempt(pool, task.message_id).await? else {
-        info!("message {} is not pending anymore, skipping", task.message_id);
+        info!(
+            "message {} is not pending anymore, skipping",
+            task.message_id
+        );
         return Ok(TaskOutcome::Ack);
     };
 
@@ -57,12 +65,18 @@ async fn answer(task: &DialogAskTask, db_pools: &PostgresPools<PostgresConnected
             Ok(TaskOutcome::Ack)
         }
         Err(e) if e.is_retryable() && attempt < max_attempts => {
-            warn!("message {} attempt {attempt}/{max_attempts} failed, retrying: {e}", task.message_id);
+            warn!(
+                "message {} attempt {attempt}/{max_attempts} failed, retrying: {e}",
+                task.message_id
+            );
             tokio::time::sleep(RETRY_DELAY * attempt).await;
             Ok(TaskOutcome::Nack { requeue: true })
         }
         Err(e) => {
-            error!("message {} failed after {attempt} attempt(s): {e}", task.message_id);
+            error!(
+                "message {} failed after {attempt} attempt(s): {e}",
+                task.message_id
+            );
             models::fail_message(pool, task.message_id, e.client_reason()).await?;
             Ok(TaskOutcome::Ack)
         }
