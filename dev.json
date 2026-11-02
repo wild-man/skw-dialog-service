@@ -39,9 +39,10 @@
   "llm": {
     "url": "http://skw-ollama:11434/v1",
     "apiKey": "",
-    "defaultModel": "llama3.2",
-    "models": ["llama3.2"],
+    "defaultModel": "qwen3:4b-instruct",
+    "models": ["qwen3:4b-instruct"],
     "timeoutSecs": 120,
-    "maxAttempts": 3
+    "maxAttempts": 3,
+    "reasoningEffort": "none"
   }
 }

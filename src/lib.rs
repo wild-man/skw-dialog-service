@@ -3,8 +3,10 @@
 use serde_derive::Deserialize;
 use skw_lib_shared::prelude::{APP, consts::RABBITMQ_QUEUES_PATH, rabbitmq::QueueConfig};
 
+pub mod code_search;
 pub mod llm;
 pub mod models;
+pub mod profile;
 
 /// Base name of the queue `Ask` publishes `DialogAskTask`s to (entry in `/rabbitmq/queues`).
 pub const ASK_QUEUE: &str = "dialog-ask";

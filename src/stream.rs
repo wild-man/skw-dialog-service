@@ -121,6 +121,7 @@ async fn handle_message(
             let task = DialogAskTask {
                 dialog_id,
                 message_id: assistant_message_id,
+                signature: Some(meta.signature.clone()),
             };
 
             if let Err(e) = ask_publisher.publish(&task).await {

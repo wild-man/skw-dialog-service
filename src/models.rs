@@ -127,6 +127,19 @@ pub async fn list_messages(pool: &PgPool, dialog_id: Uuid, after: Option<Uuid>) 
     rows.into_iter().map(message_from_row).collect()
 }
 
+/// One message of a dialog (the answer the final `AskAnswer` reply carries).
+pub async fn get_message(pool: &PgPool, dialog_id: Uuid, id: Uuid) -> Result<Option<Message>, SkwPostgresError> {
+    let row: Option<MessageRow> = sqlx::query_as(&format!(
+        "SELECT {MESSAGE_COLUMNS} FROM messages WHERE dialog_id = $1 AND id = $2"
+    ))
+    .bind(dialog_id)
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+
+    row.map(message_from_row).transpose()
+}
+
 pub async fn rename_dialog(pool: &PgPool, owner_id: Uuid, id: Uuid, title: Option<String>) -> Result<Option<Dialog>, SkwPostgresError> {
     let row: Option<DialogRow> = sqlx::query_as(&format!(
         "UPDATE dialogs SET title = $3 WHERE id = $1 AND owner_id = $2 RETURNING {DIALOG_COLUMNS}"
