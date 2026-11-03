@@ -980,3 +980,274 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 }
+
+/// Attempts to read outside the root (or denied files inside it) through every tool and every
+/// slash command. The fixture plants `SECRET` outside the root, in a sibling dir whose name
+/// starts with the root's name, behind symlinks inside the root and in denied/hidden files;
+/// none of it may ever reach a tool result.
+#[cfg(all(test, unix))]
+mod escape_tests {
+    use std::os::unix::fs::symlink;
+
+    use super::*;
+
+    const SECRET: &str = "TOP-SECRET-7f3a";
+
+    struct Fixture {
+        base: PathBuf,
+        root: PathBuf,
+        search: CodeSearch,
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.base);
+        }
+    }
+
+    //  base/
+    //    outside/secret.txt, outside/nested/secret.rs   (outside the root)
+    //    root-evil/secret.txt                           (sibling sharing the root's name prefix)
+    //    root/                                          (the root)
+    //      src/main.rs                                  (the only readable file with content)
+    //      src/link_out.txt  -> base/outside/secret.txt (symlink to a file outside)
+    //      src/dir_out       -> base/outside            (symlink to a dir outside)
+    //      src/link_abs      -> /etc                    (absolute symlink outside)
+    //      src/link_local    -> ../local.json           (symlink inside to a denied file)
+    //      src/link_git      -> ../.git                 (symlink inside to a hidden dir)
+    //      local.json, key.pem, target/out.rs, .git/config, .env (denied or hidden)
+    //      diagrams/evil.json (meta.output pointing outside)
+    fn fixture() -> Fixture {
+        let base = std::env::temp_dir().join(format!("skw-escape-{}", uuid::Uuid::now_v7()));
+        let root = base.join("root");
+        for dir in [
+            "outside/nested",
+            "root-evil",
+            "root/src",
+            "root/target",
+            "root/.git",
+            "root/diagrams",
+        ] {
+            fs::create_dir_all(base.join(dir)).unwrap();
+        }
+        let secret = format!("password = {SECRET}\n");
+        for file in [
+            "outside/secret.txt",
+            "outside/nested/secret.rs",
+            "root-evil/secret.txt",
+            "root/local.json",
+            "root/key.pem",
+            "root/target/out.rs",
+            "root/.git/config",
+            "root/.env",
+        ] {
+            fs::write(base.join(file), &secret).unwrap();
+        }
+        fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+        fs::write(
+            root.join("diagrams/evil.json"),
+            r#"{"meta": {"title": "Evil", "output": "../../outside/secret.txt"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("diagrams/evil2.json"),
+            r#"{"meta": {"title": "Evil2", "output": "/etc/hostname"}}"#,
+        )
+        .unwrap();
+        symlink(
+            base.join("outside/secret.txt"),
+            root.join("src/link_out.txt"),
+        )
+        .unwrap();
+        symlink(base.join("outside"), root.join("src/dir_out")).unwrap();
+        symlink("/etc", root.join("src/link_abs")).unwrap();
+        symlink("../local.json", root.join("src/link_local")).unwrap();
+        symlink("../.git", root.join("src/link_git")).unwrap();
+
+        let search = CodeSearch::new(&CodeSearchConfig {
+            root: root.clone(),
+            max_steps: 3,
+            deny_dirs: vec!["target".into()],
+            deny_files: vec!["local.json".into()],
+            deny_extensions: vec!["pem".into()],
+            system_prompt: None,
+            diagrams: Some(DiagramsConfig {
+                dir: "diagrams".into(),
+                url_prefix: "diagrams/".into(),
+            }),
+        });
+        Fixture { base, root, search }
+    }
+
+    /// Paths that must be refused, as relative, traversal, absolute and symlinked forms.
+    fn hostile_paths(f: &Fixture) -> Vec<String> {
+        let base = f.base.display().to_string();
+        let root = f.root.display().to_string();
+        vec![
+            "..".into(),
+            "../".into(),
+            "../outside/secret.txt".into(),
+            "../../../../../../etc/passwd".into(),
+            "./../outside/secret.txt".into(),
+            "src/../../outside/secret.txt".into(),
+            "src/../../root-evil/secret.txt".into(),
+            "../root-evil/secret.txt".into(),
+            "/etc/passwd".into(),
+            "/etc".into(),
+            "/".into(),
+            format!("{base}/outside/secret.txt"),
+            format!("{base}/outside"),
+            format!("{root}-evil/secret.txt"),
+            format!("{root}/../outside/secret.txt"),
+            format!("{root}/local.json"),
+            "src/link_out.txt".into(),
+            "src/dir_out".into(),
+            "src/dir_out/secret.txt".into(),
+            "src/dir_out/nested/secret.rs".into(),
+            "src/link_abs".into(),
+            "src/link_abs/passwd".into(),
+            "src/link_local".into(),
+            "src/link_git".into(),
+            "src/link_git/config".into(),
+            "local.json".into(),
+            "./local.json".into(),
+            "src/../local.json".into(),
+            "key.pem".into(),
+            "KEY.PEM".into(),
+            "target/out.rs".into(),
+            "target".into(),
+            ".git/config".into(),
+            ".git".into(),
+            ".env".into(),
+            "src/../.git/config".into(),
+            "..\\outside\\secret.txt".into(),
+            "%2e%2e/outside/secret.txt".into(),
+            "~/.ssh/id_ed25519".into(),
+            "src/main.rs\0../../outside/secret.txt".into(),
+        ]
+    }
+
+    #[track_caller]
+    fn assert_refused(f: &Fixture, tool: &str, args: Value) {
+        let out = f.search.call(tool, &args.to_string());
+        assert!(
+            out.for_model.starts_with("error:"),
+            "{tool} {args} was not refused: {}",
+            out.for_model
+        );
+        assert!(out.shown.is_none(), "{tool} {args} attached something");
+        assert!(
+            !out.for_model.contains(SECRET),
+            "{tool} {args} leaked the secret"
+        );
+    }
+
+    #[test]
+    fn read_and_show_file_refuse_every_hostile_path() {
+        let f = fixture();
+        for path in hostile_paths(&f) {
+            assert_refused(&f, "read_file", json!({ "path": path }));
+            assert_refused(
+                &f,
+                "read_file",
+                json!({ "path": path, "start_line": 1, "end_line": 5 }),
+            );
+            assert_refused(&f, "show_file", json!({ "path": path }));
+        }
+    }
+
+    #[test]
+    fn list_files_and_search_refuse_hostile_dirs() {
+        let f = fixture();
+        for dir in hostile_paths(&f) {
+            // ".." style paths that resolve to the root's parent, or outside, or a denied dir
+            assert_refused(&f, "list_files", json!({ "dir": dir, "depth": 4 }));
+            assert_refused(
+                &f,
+                "search_text",
+                json!({ "query": "password", "dir": dir }),
+            );
+        }
+    }
+
+    #[test]
+    fn whole_tree_listing_and_search_never_follow_symlinks_or_show_denied_files() {
+        let f = fixture();
+        let listing = f.search.call("list_files", r#"{"depth": 4}"#).for_model;
+        assert_eq!(
+            listing,
+            "diagrams/\ndiagrams/evil.json\ndiagrams/evil2.json\nsrc/\nsrc/main.rs"
+        );
+
+        for query in [SECRET, "password"] {
+            let out = f
+                .search
+                .call("search_text", &json!({ "query": query }).to_string());
+            assert_eq!(out.for_model, format!("no matches for '{query}'"));
+        }
+    }
+
+    #[test]
+    fn diagrams_refuse_outputs_outside_their_dir() {
+        let f = fixture();
+        let out = f.search.call("diagrams", "{}");
+        assert_eq!(out.for_model, "error: no diagrams found");
+        assert!(out.shown.is_none());
+    }
+
+    #[test]
+    fn slash_commands_refuse_every_hostile_path() {
+        let f = fixture();
+        for path in hostile_paths(&f) {
+            // a NUL byte can't be typed into a command word list meaningfully; whitespace splits it
+            for command in [
+                format!("/read_file {path}"),
+                format!("/show_file {path}"),
+                format!("/list_files {path} 4"),
+            ] {
+                let answer = f.search.run_command(&command).unwrap_or_default();
+                assert!(!answer.contains(SECRET), "{command:?} leaked the secret");
+                assert!(
+                    answer.contains("failed:"),
+                    "{command:?} was not refused: {answer}"
+                );
+            }
+            let answer = f
+                .search
+                .run_command(&format!("/search_text password dir={path}"))
+                .unwrap_or_default();
+            assert!(
+                !answer.contains(SECRET),
+                "/search_text dir={path} leaked the secret"
+            );
+        }
+    }
+
+    #[test]
+    fn paths_inside_the_root_still_work() {
+        let f = fixture();
+        let root = f.root.display().to_string();
+        for path in [
+            "src/main.rs",
+            "./src/main.rs",
+            "src/../src/main.rs",
+            "src/./main.rs",
+            &format!("{root}/src/main.rs"),
+        ] {
+            let out = f
+                .search
+                .call("read_file", &json!({ "path": path }).to_string());
+            assert!(
+                out.for_model.starts_with("src/main.rs (lines 1-1 of 1)"),
+                "{path}: {}",
+                out.for_model
+            );
+        }
+        assert_eq!(
+            f.search
+                .call("list_files", r#"{"dir": "src/.."}"#)
+                .for_model,
+            "diagrams/\ndiagrams/evil.json\ndiagrams/evil2.json\nsrc/\nsrc/main.rs"
+        );
+    }
+}
