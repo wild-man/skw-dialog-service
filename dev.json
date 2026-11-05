@@ -12,7 +12,7 @@
     "topicTypes": ["signed"]
   },
   "iggy": {
-    "url": "iggy://iggy:Secret123!@skw-iggy:3000",
+    "url": "iggy+quic://iggy:Secret123!@skw-iggy:8080",
     "streamPrefix": "api-gate-stream"
   },
   "redis": {

@@ -11,7 +11,11 @@ use sqlx::PgPool;
 
 use crate::llm::Answer;
 
-const DIALOG_COLUMNS: &str = "id, title, model, uuid_extract_timestamp(id), updated_at";
+macro_rules! dialog_columns {
+    () => {
+        "id, title, model, uuid_extract_timestamp(id), updated_at"
+    };
+}
 
 type DialogRow = (Uuid, Option<String>, String, DateTime<Utc>, DateTime<Utc>);
 
@@ -25,7 +29,11 @@ fn dialog_from_row((id, title, model, created_at, updated_at): DialogRow) -> Dia
     }
 }
 
-const MESSAGE_COLUMNS: &str = "id, role::text, status::text, content, error, uuid_extract_timestamp(id)";
+macro_rules! message_columns {
+    () => {
+        "id, role::text, status::text, content, error, uuid_extract_timestamp(id)"
+    };
+}
 
 type MessageRow = (Uuid, String, String, String, Option<String>, DateTime<Utc>);
 
@@ -66,8 +74,9 @@ pub async fn create_dialog(
 ) -> Result<Dialog, SkwPostgresError> {
     let mut tx = pool.begin().await?;
 
-    let row: DialogRow = sqlx::query_as(&format!(
-        "INSERT INTO dialogs (owner_id, title, model) VALUES ($1, $2, $3) RETURNING {DIALOG_COLUMNS}"
+    let row: DialogRow = sqlx::query_as(concat!(
+        "INSERT INTO dialogs (owner_id, title, model) VALUES ($1, $2, $3) RETURNING ",
+        dialog_columns!()
     ))
     .bind(owner_id)
     .bind(title)
@@ -90,8 +99,10 @@ pub async fn create_dialog(
 
 /// Owner's dialogs, most recently active first, older than `before` when given.
 pub async fn list_dialogs(pool: &PgPool, owner_id: Uuid, limit: u32, before: Option<DateTime<Utc>>) -> Result<Vec<Dialog>, SkwPostgresError> {
-    let rows: Vec<DialogRow> = sqlx::query_as(&format!(
-        "SELECT {DIALOG_COLUMNS} FROM dialogs WHERE owner_id = $1 AND ($2::timestamptz IS NULL OR updated_at < $2) ORDER BY updated_at DESC LIMIT $3"
+    let rows: Vec<DialogRow> = sqlx::query_as(concat!(
+        "SELECT ",
+        dialog_columns!(),
+        " FROM dialogs WHERE owner_id = $1 AND ($2::timestamptz IS NULL OR updated_at < $2) ORDER BY updated_at DESC LIMIT $3"
     ))
     .bind(owner_id)
     .bind(before)
@@ -103,8 +114,10 @@ pub async fn list_dialogs(pool: &PgPool, owner_id: Uuid, limit: u32, before: Opt
 }
 
 pub async fn get_dialog(pool: &PgPool, owner_id: Uuid, id: Uuid) -> Result<Option<Dialog>, SkwPostgresError> {
-    let row: Option<DialogRow> = sqlx::query_as(&format!(
-        "SELECT {DIALOG_COLUMNS} FROM dialogs WHERE id = $1 AND owner_id = $2"
+    let row: Option<DialogRow> = sqlx::query_as(concat!(
+        "SELECT ",
+        dialog_columns!(),
+        " FROM dialogs WHERE id = $1 AND owner_id = $2"
     ))
     .bind(id)
     .bind(owner_id)
@@ -116,8 +129,10 @@ pub async fn get_dialog(pool: &PgPool, owner_id: Uuid, id: Uuid) -> Result<Optio
 
 /// Messages of a dialog in chronological order, only those newer than `after` when given.
 pub async fn list_messages(pool: &PgPool, dialog_id: Uuid, after: Option<Uuid>) -> Result<Vec<Message>, SkwPostgresError> {
-    let rows: Vec<MessageRow> = sqlx::query_as(&format!(
-        "SELECT {MESSAGE_COLUMNS} FROM messages WHERE dialog_id = $1 AND ($2::uuid IS NULL OR id > $2) ORDER BY id"
+    let rows: Vec<MessageRow> = sqlx::query_as(concat!(
+        "SELECT ",
+        message_columns!(),
+        " FROM messages WHERE dialog_id = $1 AND ($2::uuid IS NULL OR id > $2) ORDER BY id"
     ))
     .bind(dialog_id)
     .bind(after)
@@ -129,8 +144,10 @@ pub async fn list_messages(pool: &PgPool, dialog_id: Uuid, after: Option<Uuid>) 
 
 /// One message of a dialog (the answer the final `AskAnswer` reply carries).
 pub async fn get_message(pool: &PgPool, dialog_id: Uuid, id: Uuid) -> Result<Option<Message>, SkwPostgresError> {
-    let row: Option<MessageRow> = sqlx::query_as(&format!(
-        "SELECT {MESSAGE_COLUMNS} FROM messages WHERE dialog_id = $1 AND id = $2"
+    let row: Option<MessageRow> = sqlx::query_as(concat!(
+        "SELECT ",
+        message_columns!(),
+        " FROM messages WHERE dialog_id = $1 AND id = $2"
     ))
     .bind(dialog_id)
     .bind(id)
@@ -141,8 +158,9 @@ pub async fn get_message(pool: &PgPool, dialog_id: Uuid, id: Uuid) -> Result<Opt
 }
 
 pub async fn rename_dialog(pool: &PgPool, owner_id: Uuid, id: Uuid, title: Option<String>) -> Result<Option<Dialog>, SkwPostgresError> {
-    let row: Option<DialogRow> = sqlx::query_as(&format!(
-        "UPDATE dialogs SET title = $3 WHERE id = $1 AND owner_id = $2 RETURNING {DIALOG_COLUMNS}"
+    let row: Option<DialogRow> = sqlx::query_as(concat!(
+        "UPDATE dialogs SET title = $3 WHERE id = $1 AND owner_id = $2 RETURNING ",
+        dialog_columns!()
     ))
     .bind(id)
     .bind(owner_id)
